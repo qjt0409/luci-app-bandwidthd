@@ -85,6 +85,28 @@ run_collect "$D4" "$(epoch '2026-01-31 10:00:00')"
 check "year-boundary prune" "2025-01-01,2,2
 2026-01-31,0,0" "$(cat "$D4/daily.csv")"
 
+# ---------- 8b. selection=dev:<name> counts that device, not the default one ----------
+SYS2="$T/sys2"; DEV2="otherwan"
+mkdir -p "$SYS2/$DEV2/statistics" "$SYS2/$DEV/statistics"
+printf '100' > "$SYS2/$DEV/statistics/rx_bytes"; printf '100' > "$SYS2/$DEV/statistics/tx_bytes"
+printf '5000' > "$SYS2/$DEV2/statistics/rx_bytes"; printf '6000' > "$SYS2/$DEV2/statistics/tx_bytes"
+D5="$T/data5"
+WANSTATS_DATA_DIR="$D5" WANSTATS_SYSFS="$SYS2" WANSTATS_SELECTION="dev:$DEV2" \
+WANSTATS_EPOCH="$(epoch '2026-02-05 09:00:00')" sh "$COLLECT"
+printf '8000' > "$SYS2/$DEV2/statistics/rx_bytes"; printf '9000' > "$SYS2/$DEV2/statistics/tx_bytes"
+WANSTATS_DATA_DIR="$D5" WANSTATS_SYSFS="$SYS2" WANSTATS_SELECTION="dev:$DEV2" \
+WANSTATS_EPOCH="$(epoch '2026-02-05 09:01:00')" sh "$COLLECT"
+check "selection dev: counts selected device" "2026-02-05,3000,3000" "$(cat "$D5/daily.csv")"
+check "selection dev: state records device" "$DEV2" "$(cut -d' ' -f1 "$D5/state")"
+
+# ---------- 8c. rpcd get_options: devices from sysfs, valid JSON ----------
+echo '{}' | WANSTATS_SYSFS="$SYS2" sh "$RPCD" call get_options | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert "otherwan" in d["devices"] and "testwan" in d["devices"], d
+assert isinstance(d["interfaces"], list), d
+' && ok "rpcd get_options JSON + devices" || bad "rpcd get_options JSON + devices"
+
 # ---------- 9. rpcd get_history: daily + derived monthly as valid JSON ----------
 OUT="$(echo '{}' | WANSTATS_DATA_DIR="$D1" sh "$RPCD" call get_history)"
 echo "$OUT" | python3 -c '

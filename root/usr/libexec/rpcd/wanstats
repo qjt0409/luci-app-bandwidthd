@@ -69,9 +69,49 @@ get_status() {
 		"$running" "$dev" "$updated" "$last_rx" "$last_tx" "${days:-0}"
 }
 
+get_options() {
+	# logical interfaces (from ubus) + physical devices (from sysfs),
+	# used by the settings page to build the interface selection list
+	local sysfs dump i cnt name proto dev l3
+	sysfs="${WANSTATS_SYSFS:-/sys/class/net}"
+	printf '{"interfaces":['
+	if command -v ubus >/dev/null 2>&1 && command -v jsonfilter >/dev/null 2>&1; then
+		dump="$(ubus call network.interface dump 2>/dev/null)"
+		if [ -n "$dump" ]; then
+			i=0; cnt=0
+			while :; do
+				name="$(printf '%s' "$dump" | jsonfilter -e "@.interface[$i].interface" 2>/dev/null)"
+				[ -n "$name" ] || break
+				proto="$(printf '%s' "$dump" | jsonfilter -e "@.interface[$i].protocol" 2>/dev/null)"
+				dev="$(printf '%s' "$dump" | jsonfilter -e "@.interface[$i].device" 2>/dev/null)"
+				l3="$(printf '%s' "$dump" | jsonfilter -e "@.interface[$i].l3_device" 2>/dev/null)"
+				i=$((i+1))
+				case "$name" in *[!A-Za-z0-9_.-]*) continue ;; esac
+				case "$proto" in *[!A-Za-z0-9_.-]*) proto="" ;; esac
+				case "$dev" in *[!A-Za-z0-9_.-]*) dev="" ;; esac
+				case "$l3" in *[!A-Za-z0-9_.-]*) l3="" ;; esac
+				[ "$cnt" -gt 0 ] && printf ','
+				printf '{"name":"%s","proto":"%s","device":"%s","l3_device":"%s"}' "$name" "$proto" "$dev" "$l3"
+				cnt=$((cnt+1))
+			done
+		fi
+	fi
+	printf '],"devices":['
+	local n=0 d
+	for d in "$sysfs"/*; do
+		[ -d "$d" ] || continue
+		d="${d##*/}"
+		case "$d" in *[!A-Za-z0-9_.-]*|'') continue ;; esac
+		[ "$n" -gt 0 ] && printf ','
+		printf '"%s"' "$d"
+		n=$((n+1))
+	done
+	printf ']}\n'
+}
+
 case "$1" in
 	list)
-		printf '{"get_history":{},"get_status":{}}\n'
+		printf '{"get_history":{},"get_status":{},"get_options":{}}\n'
 		;;
 	call)
 		# consume the JSON argument object
@@ -79,6 +119,7 @@ case "$1" in
 		case "$2" in
 			get_history) get_history ;;
 			get_status) get_status ;;
+			get_options) get_options ;;
 			*) printf '{}\n' ;;
 		esac
 		;;

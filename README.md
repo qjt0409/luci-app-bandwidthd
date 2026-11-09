@@ -61,12 +61,20 @@ tests/run-tests.sh                           沙盒测试（假计数器 + 固�
 ```
 config wanstats 'settings'
 	option enabled '1'              # 采集开关
-	option interface 'wan'          # WAN 逻辑接口（自动检测设备名用）
-	option device ''                # WAN 设备名，留空自动检测（ubus l3_device）
+	option selection 'auto'         # 统计接口：auto / if:<逻辑接口> / dev:<物理设备>（ LuCI 设置页下拉选择）
+	option interface 'wan'          # 旧选项：auto 时的 WAN 逻辑接口
+	option device ''                # 旧选项：auto 时的设备名覆盖，留空走 ubus l3_device
 	option data_dir '/etc/wanstats' # 数据目录，建议放硬盘如 /mnt/sdb2/tongji-wan
 	option interval '60'            # 采样间隔（秒）
 	option retention_months '13'    # 保留月数
 ```
+
+统计接口三种选法（LuCI「网络 → WAN流量统计」设置页，列表由系统实时生成）：
+
+- **auto（推荐）**：跟随逻辑接口 wan 的当前 l3_device——PPPoE 时是 pppoe-wan，
+  改成 DHCP/静态后自动变成其物理网卡，不用改设置；
+- **if:\<逻辑接口\>**：钉死某个逻辑接口，统计它的 l3_device；
+- **dev:\<物理设备\>**：钉死物理设备（如 eth1），含该口上的全部流量（含 PPPoE 封装开销）。
 
 ## 编译进固件
 
@@ -89,7 +97,8 @@ sh tests/run-tests.sh
 
 用假的 sysfs 计数器与固定纪元时间驱动真实的采样脚本，覆盖：
 首次基线、同日累计、跨日新行、计数器复位、时钟未校准不累计、
-13 个月清理（含跨年边界）、rpcd 历史 JSON 与月度求和、脚本/JSON/JS 语法。
+13 个月清理（含跨年边界）、按物理设备选择统计、rpcd 历史/选项 JSON
+与月度求和、脚本/JSON/JS 语法（共 24 项）。
 
 ## 许可
 

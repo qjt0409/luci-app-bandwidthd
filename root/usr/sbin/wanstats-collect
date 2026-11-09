@@ -23,7 +23,7 @@
 # traffic is never booked into a wrong (1970) day.
 #
 # Test hooks (never set in production): WANSTATS_DATA_DIR, WANSTATS_DEV,
-# WANSTATS_SYSFS, WANSTATS_EPOCH.
+# WANSTATS_SYSFS, WANSTATS_EPOCH, WANSTATS_SELECTION.
 
 MIN_VALID_EPOCH=1704067200	# 2024-01-01 00:00:00 UTC
 
@@ -45,13 +45,28 @@ resolve_dev() {
 	if [ -n "$WANSTATS_DEV" ]; then
 		echo "$WANSTATS_DEV"; return 0
 	fi
-	local d iface st
-	d="$(uci_get device)"
-	if [ -n "$d" ]; then
-		echo "$d"; return 0
+	local d iface st sel
+	# UI selection wins over the legacy device/interface options:
+	#   dev:<name>  count this physical device
+	#   if:<name>   count the l3_device of this logical interface
+	#   auto        legacy behaviour below
+	sel="${WANSTATS_SELECTION:-$(uci_get selection)}"
+	case "$sel" in
+		dev:*)
+			echo "${sel#dev:}"; return 0 ;;
+		if:*)
+			iface="${sel#if:}" ;;
+		*)
+			iface="" ;;
+	esac
+	if [ -z "$iface" ]; then
+		d="$(uci_get device)"
+		if [ -n "$d" ]; then
+			echo "$d"; return 0
+		fi
+		iface="$(uci_get interface)"
+		iface="${iface:-wan}"
 	fi
-	iface="$(uci_get interface)"
-	iface="${iface:-wan}"
 	if command -v ubus >/dev/null 2>&1 && command -v jsonfilter >/dev/null 2>&1; then
 		st="$(ubus call "network.interface.$iface" status 2>/dev/null)"
 		if [ -n "$st" ]; then

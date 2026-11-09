@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-bandwidthd
-PKG_VERSION:=2.0.0
+PKG_VERSION:=2.1.0
 PKG_RELEASE:=1
 PKG_MAINTAINER:=qjt0409
 PKG_LICENSE:=MIT
@@ -54,11 +54,18 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/bandwidthd
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/bandwidthd/config.js $(1)/www/luci-static/resources/view/bandwidthd/config.js
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/bandwidthd/wanstats.js $(1)/www/luci-static/resources/view/bandwidthd/wanstats.js
+	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/bandwidthd/settings.js $(1)/www/luci-static/resources/view/bandwidthd/settings.js
 endef
 
 define Package/$(PKG_NAME)/postinst
 #!/bin/sh
 [ -n "$$IPKG_INSTROOT" ] || {
+	# remove leftovers of the old Lua-based luci-app-bandwidthd 1-1
+	# (its controller would shadow this app's menu entries)
+	rm -f /usr/lib/lua/luci/controller/bandwidthd.lua \
+		/usr/lib/lua/luci/model/cbi/bandwidthd.lua \
+		/usr/lib/lua/luci/i18n/bandwidthd.zh-cn.lmo \
+		/etc/init_bandwidthd.sh
 	rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
 	/etc/init.d/wanstats enable 2>/dev/null
 	/etc/init.d/wanstats restart 2>/dev/null
