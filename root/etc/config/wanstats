@@ -1,0 +1,6 @@
+config wanstats 'settings'
+	option enabled '1'
+	option interface 'wan'
+	option data_dir '/etc/wanstats'
+	option interval '60'
+	option retention_months '13'

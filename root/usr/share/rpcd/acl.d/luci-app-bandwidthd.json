@@ -1,0 +1,1 @@
+{"luci-app-bandwidthd":{"description":"Grant access to the bandwidthd configuration and the WAN traffic history","read":{"ubus":{"wanstats":["get_history","get_status"]},"uci":["bandwidthd","wanstats"]},"write":{"uci":["bandwidthd","wanstats"]}}}

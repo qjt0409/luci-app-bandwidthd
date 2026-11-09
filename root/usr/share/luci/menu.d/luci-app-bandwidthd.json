@@ -1,0 +1,1 @@
+{"admin/network/bandwidthd":{"action":{"path":"bandwidthd/config","type":"view"},"depends":{"acl":["luci-app-bandwidthd"],"fs":{"/etc/config/bandwidthd":"read"}},"order":80,"title":"Bandwidthd"},"admin/status/wanstats":{"action":{"path":"bandwidthd/wanstats","type":"view"},"depends":{"acl":["luci-app-bandwidthd"]},"order":85,"title":"WAN流量统计"}}
