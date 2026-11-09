@@ -1,0 +1,16 @@
+#!/bin/sh
+# wanstatsd - sampling loop for wanstats-collect (started by procd)
+COLLECT="/usr/sbin/wanstats-collect"
+
+while true; do
+	interval=""
+	if command -v uci >/dev/null 2>&1; then
+		interval="$(uci -q get wanstats.settings.interval 2>/dev/null)"
+	fi
+	interval="${WANSTATS_INTERVAL:-$interval}"
+	case "$interval" in ''|*[!0-9]*) interval=60 ;; esac
+	[ "$interval" -ge 10 ] || interval=10
+
+	"$COLLECT"
+	sleep "$interval"
+done

@@ -100,6 +100,14 @@ sh tests/run-tests.sh
 13 个月清理（含跨年边界）、按物理设备选择统计、rpcd 历史/选项 JSON
 与月度求和、脚本/JSON/JS 语法（共 24 项）。
 
+## 独立子包 luci-app-wanstats
+
+`luci-app-wanstats/` 子目录是同一套 wanstats 的独立打包（版本 1.1.0，
+自有 acl/menu 名，不含 bandwidthd 配置页）：可与原版
+AlexZhuo/luci-app-bandwidthd 并存安装。固件构建时克隆本仓库后
+提取该子目录单独成包；与根目录整包**不要同机共装**（共享 wanstats
+的服务与脚本文件）。
+
 ## 许可
 
 MIT（见 LICENSE）。统计方法源自 Padavan 的 rstats（GPL），本仓库为

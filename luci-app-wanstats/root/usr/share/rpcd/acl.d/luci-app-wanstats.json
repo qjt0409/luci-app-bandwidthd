@@ -1,0 +1,10 @@
+{
+	"luci-app-wanstats": {
+		"description": "Grant access to the WAN traffic history and settings",
+		"read": {
+			"ubus": { "wanstats": [ "get_history", "get_status", "get_options" ] },
+			"uci": [ "wanstats" ]
+		},
+		"write": { "uci": [ "wanstats" ] }
+	}
+}

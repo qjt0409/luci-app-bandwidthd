@@ -1,0 +1,179 @@
+#!/bin/sh
+# wanstats-collect - one WAN traffic sampling pass (Padavan rstats-style)
+#
+# Method (same idea as Padavan's rstats daemon):
+#   * every pass reads the 64-bit byte counters of the WAN device from
+#     /sys/class/net/<dev>/statistics/{rx,tx}_bytes
+#   * the delta against the previous pass is added to *today's* total
+#   * daily totals are kept in a plain-text file; monthly totals are the
+#     sum of the daily totals of that month, so the two can never drift
+#   * daily entries older than the retention window (default: the current
+#     month plus the 12 previous months = 13 monthly rows) are deleted
+#     on every pass
+#
+# Counter-reset rule (reboot, PPPoE redial, driver reload): if the new
+# counter is smaller than the previous one, or the device changed, the
+# counter was reset and the delta is the counter itself (traffic since
+# the reset). Traffic between the last pass and the reset is lost; that
+# is unavoidable and matches rstats.
+#
+# Time guard (mirrors rstats' is_system_time_valid): while the clock is
+# not set yet (epoch before 2024-01-01, e.g. before NTP sync at boot),
+# only the baseline is updated and nothing is accumulated, so early
+# traffic is never booked into a wrong (1970) day.
+#
+# Test hooks (never set in production): WANSTATS_DATA_DIR, WANSTATS_DEV,
+# WANSTATS_SYSFS, WANSTATS_EPOCH, WANSTATS_SELECTION.
+
+MIN_VALID_EPOCH=1704067200	# 2024-01-01 00:00:00 UTC
+
+uci_get() {
+	# $1 = option name; prints value or nothing
+	command -v uci >/dev/null 2>&1 || return 0
+	uci -q get "wanstats.settings.$1" 2>/dev/null
+}
+
+DATA_DIR="${WANSTATS_DATA_DIR:-$(uci_get data_dir)}"
+DATA_DIR="${DATA_DIR:-/etc/wanstats}"
+RETENTION="${WANSTATS_RETENTION:-$(uci_get retention_months)}"
+RETENTION="${RETENTION:-13}"
+case "$RETENTION" in ''|*[!0-9]*) RETENTION=13 ;; esac
+[ "$RETENTION" -ge 1 ] || RETENTION=13
+SYSFS="${WANSTATS_SYSFS:-/sys/class/net}"
+
+resolve_dev() {
+	if [ -n "$WANSTATS_DEV" ]; then
+		echo "$WANSTATS_DEV"; return 0
+	fi
+	local d iface st sel
+	# UI selection wins over the legacy device/interface options:
+	#   dev:<name>  count this physical device
+	#   if:<name>   count the l3_device of this logical interface
+	#   auto        legacy behaviour below
+	sel="${WANSTATS_SELECTION:-$(uci_get selection)}"
+	case "$sel" in
+		dev:*)
+			echo "${sel#dev:}"; return 0 ;;
+		if:*)
+			iface="${sel#if:}" ;;
+		*)
+			iface="" ;;
+	esac
+	if [ -z "$iface" ]; then
+		d="$(uci_get device)"
+		if [ -n "$d" ]; then
+			echo "$d"; return 0
+		fi
+		iface="$(uci_get interface)"
+		iface="${iface:-wan}"
+	fi
+	if command -v ubus >/dev/null 2>&1 && command -v jsonfilter >/dev/null 2>&1; then
+		st="$(ubus call "network.interface.$iface" status 2>/dev/null)"
+		if [ -n "$st" ]; then
+			d="$(printf '%s' "$st" | jsonfilter -e '@.l3_device' 2>/dev/null)"
+			[ -n "$d" ] && { echo "$d"; return 0; }
+			d="$(printf '%s' "$st" | jsonfilter -e '@.device' 2>/dev/null)"
+			[ -n "$d" ] && { echo "$d"; return 0; }
+		fi
+	fi
+	ip route show default 2>/dev/null | awk '{ for (i=1;i<=NF;i++) if ($i=="dev") { print $(i+1); exit } }'
+}
+
+DEV="$(resolve_dev)"
+if [ -z "$DEV" ]; then
+	logger -t wanstats "cannot determine WAN device" 2>/dev/null
+	exit 1
+fi
+
+RX_FILE="$SYSFS/$DEV/statistics/rx_bytes"
+TX_FILE="$SYSFS/$DEV/statistics/tx_bytes"
+[ -r "$RX_FILE" ] && [ -r "$TX_FILE" ] || {
+	logger -t wanstats "counters for $DEV not readable" 2>/dev/null
+	exit 1
+}
+RX="$(cat "$RX_FILE" 2>/dev/null)"
+TX="$(cat "$TX_FILE" 2>/dev/null)"
+case "$RX" in ''|*[!0-9]*) exit 1 ;; esac
+case "$TX" in ''|*[!0-9]*) exit 1 ;; esac
+
+EPOCH="${WANSTATS_EPOCH:-$(date +%s)}"
+if [ -n "$WANSTATS_EPOCH" ]; then
+	# test mode: derive the calendar day from the given epoch (GNU date)
+	DAY="$(date -u -d "@$EPOCH" +%F 2>/dev/null)"
+	[ -n "$DAY" ] || DAY="$(date +%F)"
+else
+	DAY="$(date +%F)"
+fi
+
+mkdir -p "$DATA_DIR" || exit 1
+STATE="$DATA_DIR/state"
+DAILY="$DATA_DIR/daily.csv"
+
+# --- locking (mkdir is atomic on every supported fs) ---
+LOCK="$DATA_DIR/.lock"
+n=0
+while ! mkdir "$LOCK" 2>/dev/null; do
+	n=$((n+1))
+	[ "$n" -ge 5 ] && exit 0	# another pass is running; skip quietly
+	sleep 1
+done
+trap 'rmdir "$LOCK" 2>/dev/null' 0 INT TERM
+
+save_state() {
+	printf '%s %s %s %s\n' "$DEV" "$RX" "$TX" "$EPOCH" > "$STATE.tmp"
+	mv "$STATE.tmp" "$STATE"
+}
+
+# --- baseline / delta ---
+LAST_DEV=""; LAST_RX=0; LAST_TX=0
+if [ -r "$STATE" ]; then
+	read -r LAST_DEV LAST_RX LAST_TX _rest < "$STATE"
+fi
+case "$LAST_RX" in ''|*[!0-9]*) LAST_RX=0 ;; esac
+case "$LAST_TX" in ''|*[!0-9]*) LAST_TX=0 ;; esac
+
+FIRST=0
+[ -z "$LAST_DEV" ] && FIRST=1
+
+if [ "$FIRST" = 1 ]; then
+	DRX=0; DTX=0
+elif [ "$DEV" != "$LAST_DEV" ]; then
+	DRX=$RX; DTX=$TX
+else
+	if [ "$RX" -ge "$LAST_RX" ]; then DRX=$((RX-LAST_RX)); else DRX=$RX; fi
+	if [ "$TX" -ge "$LAST_TX" ]; then DTX=$((TX-LAST_TX)); else DTX=$TX; fi
+fi
+
+save_state
+
+# --- time guard: clock not set yet -> baseline only ---
+if [ "$EPOCH" -lt "$MIN_VALID_EPOCH" ] 2>/dev/null; then
+	exit 0
+fi
+
+# --- retention cutoff: first day of (current month - (RETENTION-1)) ---
+Y="${DAY%%-*}"; rest="${DAY#*-}"; M="${rest%%-*}"
+case "$Y" in ''|*[!0-9]*) exit 1 ;; esac
+case "$M" in ''|*[!0-9]*) exit 1 ;; esac
+M="${M#0}"; [ -n "$M" ] || M=0	# strip leading zero (POSIX $((08)) is octal/error)
+MIDX=$((Y * 12 + M - 1 - (RETENTION - 1)))
+CY=$((MIDX / 12)); CM=$((MIDX % 12 + 1))
+CUTOFF="$(printf '%04d-%02d-01' "$CY" "$CM")"
+
+# --- update daily file (accumulate today + prune) atomically ---
+TMP="$DAILY.tmp.$$"
+if [ -f "$DAILY" ]; then
+	awk -F, -v OFS=, -v day="$DAY" -v drx="$DRX" -v dtx="$DTX" -v cutoff="$CUTOFF" '
+		/^[0-9]{4}-[0-9]{2}-[0-9]{2},[0-9]+,[0-9]+$/ {
+			if ($1 < cutoff) next
+			if ($1 == day) { $2 += drx; $3 += dtx; seen = 1 }
+			print $1, $2, $3
+			next
+		}
+		END { if (!seen) print day, drx, dtx }
+	' "$DAILY" | sort > "$TMP"
+else
+	printf '%s,%s,%s\n' "$DAY" "$DRX" "$DTX" > "$TMP"
+fi
+mv "$TMP" "$DAILY"
+exit 0
