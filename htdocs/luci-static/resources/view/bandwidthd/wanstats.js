@@ -55,11 +55,13 @@ function buildTable(rows, isDaily) {
 	]);
 
 	var body = rows.map(function (r) {
+		/* data-title is required: Argon's layout below 1152px hides the
+		 * .table-titles row and labels each cell from its data-title. */
 		return E('tr', { 'class': 'tr' }, [
-			E('td', { 'class': 'td left' }, isDaily ? fmtDailyDate(r.date) : fmtMonth(r.month)),
-			E('td', { 'class': 'td right' }, fmt(r.rx)),
-			E('td', { 'class': 'td right' }, fmt(r.tx)),
-			E('td', { 'class': 'td right' }, fmt(r.rx + r.tx))
+			E('td', { 'class': 'td left', 'data-title': _('日期') }, isDaily ? fmtDailyDate(r.date) : fmtMonth(r.month)),
+			E('td', { 'class': 'td right', 'data-title': _('下行') }, fmt(r.rx)),
+			E('td', { 'class': 'td right', 'data-title': _('上行') }, fmt(r.tx)),
+			E('td', { 'class': 'td right', 'data-title': _('总共量值') }, fmt(r.rx + r.tx))
 		]);
 	});
 

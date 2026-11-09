@@ -102,7 +102,7 @@ sh tests/run-tests.sh
 
 ## 独立子包 luci-app-wanstats
 
-`luci-app-wanstats/` 子目录是同一套 wanstats 的独立打包（版本 1.1.0，
+`luci-app-wanstats/` 子目录是同一套 wanstats 的独立打包（版本 1.1.2，
 自有 acl/menu 名，不含 bandwidthd 配置页）：可与原版
 AlexZhuo/luci-app-bandwidthd 并存安装。固件构建时克隆本仓库后
 提取该子目录单独成包；与根目录整包**不要同机共装**（共享 wanstats
